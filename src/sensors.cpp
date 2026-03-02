@@ -1,19 +1,65 @@
 /* ============================================================
 **
-** Sensor handling
+**  Sensor Handling
 **
 ** ============================================================
 */
 
 #include "sensors.h"
 #include "utils.h"
+#include <math.h>
 
-// ==================== SENSOR OBJECTS ====================
+// ============================================================
+// CONSTANTS
+// ============================================================
+
+// ---- Optical ----
+constexpr int   BPM_BUFFER_SIZE      = 8;
+constexpr int   SPO2_BUFFER_SIZE     = 25;
+
+constexpr float MIN_BPM              = 40.0f;
+constexpr float MAX_BPM              = 200.0f;
+constexpr uint32_t MIN_BEAT_INTERVAL = 300;      // ms
+
+constexpr float MIN_AC_IR            = 10.0f;
+constexpr float MIN_AC_RED           = 5.0f;
+
+constexpr float SPO2_CAL_A           = 110.0f;
+constexpr float SPO2_CAL_B           = 25.0f;
+
+// ---- Environmental ----
+constexpr float SEA_LEVEL_HPA        = 1013.25f;
+
+// ---- Stair Detection ----
+constexpr float STAIR_ALT_ALPHA      = 0.10f;   // smoothing factor
+constexpr float STAIR_FLIGHT_HEIGHT  = 3.0f;    // meters
+constexpr int   STAIR_MIN_STEPS      = 8;       // minimum steps
+constexpr float STAIR_HYSTERESIS     = 1.0f;    // meters
+
+// ============================================================
+// SENSOR OBJECTS
+// ============================================================
+
 MAX30105 particleSensor;
-MPU6050 mpu(Wire);
+MPU6050  mpu(Wire);
 Adafruit_BME280 bme;
 
-// ==================== SENSOR VARIABLES ====================
+// ============================================================
+// STATE STRUCT
+// ============================================================
+
+struct SensorState {
+    float     bpm            = 0.0f;
+    float     spo2           = 0.0f;
+    uint32_t  lastBeatMs     = 0;
+
+    bool max3010xOk = false;
+    bool mpuOk      = false;
+    bool bmeOk      = false;
+};
+
+static SensorState state;
+
 uint32_t lastBeat = 0;
 float lastBPM = 0;
 float lastSpO2 = 0;
@@ -21,253 +67,274 @@ long stepCount = 0;
 long stepsSinceLastPublish = 0;
 unsigned long lastStepTime = 0;
 
-// ==================== INITIALIZATION ====================
-void initSensors() {
-    // Initialize MAX30105
-    if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
-        Serial.println("MAX30102 not found. Check wiring/power.");
-        while (1);
-    }
-    particleSensor.setup();
-    particleSensor.setPulseAmplitudeRed(0x0A);
-    particleSensor.setPulseAmplitudeGreen(0);
+// ============================================================
+// FORWARD DECLARATIONS
+// ============================================================
 
-    // Initialize MPU6050
-    byte status = mpu.begin();
-    if (status != 0) {
-        Serial.print("MPU6050 init failed: "); 
-        Serial.println(status);
-        while (1);
+static void processHeartRate(uint32_t irValue);
+static void processSpO2(uint32_t red, uint32_t ir);
+// static void updateStairs(float altitudeM);
+
+// ============================================================
+// INITIALIZATION
+// ============================================================
+
+void initSensors()
+{
+    // ---- MAX3010x ----
+    if (particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
+        particleSensor.setup();
+        particleSensor.setPulseAmplitudeRed(0x0A);
+        particleSensor.setPulseAmplitudeGreen(0);
+        state.max3010xOk = true;
+    } else {
+        Serial.println("MAX3010x not detected.");
     }
-    mpu.calcOffsets();
+
+    // ---- MPU6050 ----
+    byte status = mpu.begin();
+    if (status == 0) {
+        mpu.calcOffsets();
+        state.mpuOk = true;
+    } else {
+        Serial.print("MPU6050 init failed: ");
+        Serial.println(status);
+    }
 
     initMotionAnalysis();
 
-    // Initialize BME280
-    if (!bme.begin(0x76)) {
-        Serial.println("Could not find BME280!");
-        while (1);
-    }
-}
-
-// ==================== HEART RATE PROCESSING ====================
-void updateHeartRate() {
-    long irValue = particleSensor.getIR();
-
-    static float bpmBuffer[8] = {0};
-    static int bpmIndex = 0;
-    static bool bufferFilled = false;
-
-    // Only process if finger detected
-    if (irValue > irThreshold) {
-        if (checkForBeat(irValue)) {
-            uint32_t delta = millis() - lastBeat;
-            lastBeat = millis();
-
-            float bpm = 60.0 / (delta / 1000.0);
-
-            // Validate BPM range
-            if (bpm >= 40 && bpm <= 200) {
-                bpmBuffer[bpmIndex++] = bpm;
-                if (bpmIndex >= bpmBufferSize) { 
-                    bpmIndex = 0; 
-                    bufferFilled = true; 
-                }
-
-                // Compute smoothed BPM
-                int count = bufferFilled ? bpmBufferSize : bpmIndex;
-                float sum = 0;
-                for (int i = 0; i < count; i++) sum += bpmBuffer[i];
-                lastBPM = sum / count;
-            }
-        }
+    // ---- BME280 ----
+    if (bme.begin(0x76)) {
+        state.bmeOk = true;
     } else {
-        // No finger → slowly decay BPM reading
-        if (lastBPM > 1) lastBPM -= 0.5;
-        else lastBPM = 0;
+        Serial.println("BME280 not found.");
     }
 }
 
-void updateMotion(float userMassKg, float strideLength) {
+// ============================================================
+// OPTICAL UPDATE (Shared FIFO Read)
+// ============================================================
+
+void updateOpticalSensors()
+{
+    if (!state.max3010xOk) return;
+
+    particleSensor.check();
+
+    while (particleSensor.available()) {
+
+        uint32_t red = particleSensor.getRed();
+        uint32_t ir  = particleSensor.getIR();
+        particleSensor.nextSample();
+
+        processHeartRate(ir);
+        processSpO2(red, ir);
+    }
+}
+
+// ============================================================
+// HEART RATE
+// ============================================================
+
+static void processHeartRate(uint32_t irValue)
+{
+    static float bpmBuffer[BPM_BUFFER_SIZE] = {0};
+    static int   index  = 0;
+    static bool  filled = false;
+
+    // No finger detected
+    if (irValue <= irThreshold) {
+        state.bpm = (state.bpm > 1.0f) ? state.bpm - 0.5f : 0.0f;
+        return;
+    }
+
+    if (!checkForBeat(irValue)) return;
+
+    uint32_t now   = millis();
+    uint32_t delta = now - state.lastBeatMs;
+    state.lastBeatMs = now;
+
+    if (delta < MIN_BEAT_INTERVAL) return;
+
+    float bpm = 60000.0f / delta;
+
+    if (bpm < MIN_BPM || bpm > MAX_BPM) return;
+
+    bpmBuffer[index++] = bpm;
+
+    if (index >= BPM_BUFFER_SIZE) {
+        index = 0;
+        filled = true;
+    }
+
+    int count = filled ? BPM_BUFFER_SIZE : index;
+    float sum = 0;
+
+    for (int i = 0; i < count; i++)
+        sum += bpmBuffer[i];
+
+    state.bpm = sum / count;
+}
+
+// ============================================================
+// SPO2
+// ============================================================
+
+static void processSpO2(uint32_t red, uint32_t ir)
+{
+    static uint32_t redBuf[SPO2_BUFFER_SIZE] = {0};
+    static uint32_t irBuf[SPO2_BUFFER_SIZE]  = {0};
+    static int index  = 0;
+    static int filled = 0;
+
+    redBuf[index] = red;
+    irBuf[index]  = ir;
+
+    index = (index + 1) % SPO2_BUFFER_SIZE;
+    if (filled < SPO2_BUFFER_SIZE) filled++;
+
+    if (filled < SPO2_BUFFER_SIZE / 2) return;
+
+    float dcRed = 0, dcIr = 0;
+    for (int i = 0; i < filled; i++) {
+        dcRed += redBuf[i];
+        dcIr  += irBuf[i];
+    }
+
+    dcRed /= filled;
+    dcIr  /= filled;
+
+    if (dcRed < 1.0f || dcIr < 1.0f) return;
+
+    float acRed2 = 0, acIr2 = 0;
+
+    for (int i = 0; i < filled; i++) {
+        float dr = redBuf[i] - dcRed;
+        float di = irBuf[i]  - dcIr;
+        acRed2 += dr * dr;
+        acIr2  += di * di;
+    }
+
+    float acRed = sqrtf(acRed2 / filled);
+    float acIr  = sqrtf(acIr2  / filled);
+
+    if (acIr < MIN_AC_IR || acRed < MIN_AC_RED) {
+        state.spo2 = (state.spo2 > 1.0f) ? state.spo2 * 0.97f : 0.0f;
+        return;
+    }
+
+    float R = (acRed / dcRed) / (acIr / dcIr);
+    float rawSpO2 = SPO2_CAL_A - SPO2_CAL_B * R;
+
+    if (rawSpO2 < spo2MinValid || rawSpO2 > spo2MaxValid) {
+        state.spo2 = (state.spo2 > 1.0f) ? state.spo2 * 0.97f : 0.0f;
+        return;
+    }
+
+    if (state.spo2 < spo2MinValid)
+        state.spo2 = rawSpO2;
+    else
+        state.spo2 = spo2Alpha * rawSpO2 +
+                     (1.0f - spo2Alpha) * state.spo2;
+}
+
+// ============================================================
+// MOTION
+// ============================================================
+
+void updateMotion(float userMassKg, float strideLength)
+{
+    if (!state.mpuOk) return;
+
     mpu.update();
-    
-    // Get accelerometer and gyroscope data
+
     float ax = mpu.getAccX();
     float ay = mpu.getAccY();
     float az = mpu.getAccZ();
     float gx = mpu.getGyroX();
     float gy = mpu.getGyroY();
     float gz = mpu.getGyroZ();
-    
-    // Process with advanced motion analysis
-    // Pass user parameters into motion processing
-    processMotionData(ax, ay, az, gx, gy, gz, userMassKg, strideLength);
+
+    processMotionData(ax, ay, az,
+                      gx, gy, gz,
+                      userMassKg,
+                      strideLength);
 }
 
-// ==================== STAIR DETECTION ====================
-//
-// A flight is confirmed when:
-//   1. Smoothed altitude rises >= stairFlightHeight (3 m)
-//   2. At least stairMinSteps steps occurred during that rise
-//
-// The step requirement filters out elevators, drift, and sensor glitches —
-// all of which can produce 3 m of apparent altitude gain with zero steps.
-//
-void updateStairs(float altitudeM) {
-    static float smoothedAlt   = 0;
-    static bool  initialised   = false;
-    static float baseAlt       = 0;   // altitude when we started tracking this climb
-    static int   baseSteps     = 0;   // step count when we started tracking
+// ============================================================
+// STAIR DETECTION
+// ============================================================
 
-    if (!initialised) {
-        smoothedAlt  = altitudeM;
-        baseAlt      = altitudeM;
-        baseSteps    = currentSession.totalSteps;
-        initialised  = true;
+void updateStairs(float altitudeM)
+{
+    static float smoothedAlt = 0;
+    static bool  initialized = false;
+    static float baseAlt     = 0;
+    static int   baseSteps   = 0;
+
+    if (!initialized) {
+        smoothedAlt = altitudeM;
+        baseAlt     = altitudeM;
+        baseSteps   = currentSession.totalSteps;
+        initialized = true;
         return;
     }
 
-    // Slow EMA to smooth footstrike bounce
-    smoothedAlt = stairAltAlpha * altitudeM + (1.0f - stairAltAlpha) * smoothedAlt;
+    // EMA smoothing
+    smoothedAlt = STAIR_ALT_ALPHA * altitudeM +
+                  (1.0f - STAIR_ALT_ALPHA) * smoothedAlt;
 
     float gain  = smoothedAlt - baseAlt;
-    int   steps = currentSession.totalSteps - baseSteps;
+    int steps   = currentSession.totalSteps - baseSteps;
 
-    if (gain >= stairFlightHeight) {
-        if (steps >= stairMinSteps) {
-            // Confirmed: real altitude gain with real steps taken
+    if (gain >= STAIR_FLIGHT_HEIGHT) {
+
+        if (steps >= STAIR_MIN_STEPS) {
             currentSession.flightsClimbed++;
-            Serial.printf("Stair flight #%d detected\n", currentSession.flightsClimbed);
+            Serial.printf("Stair flight #%d detected\n",
+                          currentSession.flightsClimbed);
         }
-        // Reset baseline regardless (drift or real — don't double-count)
+
         baseAlt   = smoothedAlt;
         baseSteps = currentSession.totalSteps;
     }
 
-    // If we've descended back to baseline, reset so next climb starts fresh
-    if (gain < -stairHysteresis) {
+    if (gain < -STAIR_HYSTERESIS) {
         baseAlt   = smoothedAlt;
         baseSteps = currentSession.totalSteps;
     }
 }
 
-// ==================== ENVIRONMENTAL PROCESSING ====================
-void updateEnvironment() {
+// ============================================================
+// ENVIRONMENT
+// ============================================================
+
+void updateEnvironment()
+{
+    if (!state.bmeOk) return;
+
     float temperature = bme.readTemperature();
-    float pressure = bme.readPressure() / 100.0F;
-    float humidity = bme.readHumidity();
-    float altitude = bme.readAltitude(1013.25);
+    float pressure    = bme.readPressure() / 100.0f;
+    float humidity    = bme.readHumidity();
+    float altitude    = bme.readAltitude(SEA_LEVEL_HPA);
 
-    updateStairs(altitude);   // feed raw altitude into stair detector every sample
+    updateStairs(altitude);
 
-    avgData.add(temperature, pressure, humidity, altitude, lastBPM);
+    avgData.add(temperature,
+                pressure,
+                humidity,
+                altitude,
+                state.bpm,
+                state.spo2);
 }
 
-// ==================== SPO2 PROCESSING ====================
-//
-// Ankle-mounted SpO2 is challenging: perfusion is weaker, motion artifacts
-// are constant, and the IR/Red AC components are small relative to noise.
-// Strategy:
-//   1. Fill a rolling buffer of raw Red and IR samples.
-//   2. Use a simple ratio-of-ratios (R = (ACred/DCred) / (ACir/DCir)),
-//      then map via the standard empirical calibration curve.
-//   3. Median-filter the buffer to reject spike outliers from footstrike.
-//   4. Apply a very slow EMA (spo2Alpha = 0.1) so the output changes
-//      gradually and motion transients don't dominate.
-//   5. Require IR > spo2IrThreshold before trusting any reading.
-//
-void updateSpO2() {
-    // Rolling buffers for raw samples
-    static uint32_t redBuf[25] = {0};
-    static uint32_t irBuf[25]  = {0};
-    static int      bufIdx     = 0;
-    static int      bufFill    = 0;   // how many valid samples collected
+// ============================================================
+// GETTERS
+// ============================================================
 
-    // Collect one sample per call (sensor FIFO)
-    particleSensor.check();
-    if (particleSensor.available()) {
-        redBuf[bufIdx] = particleSensor.getRed();
-        irBuf[bufIdx]  = particleSensor.getIR();
-        particleSensor.nextSample();
+float getCurrentBPM()   { return state.bpm;  }
+float getCurrentSpO2()  { return state.spo2; }
 
-        bufIdx  = (bufIdx + 1) % spo2SampleCount;
-        if (bufFill < spo2SampleCount) bufFill++;
-    }
-
-    // Need at least half the buffer filled and a strong enough IR signal
-    long irSum = 0;
-    for (int i = 0; i < bufFill; i++) irSum += irBuf[i];
-    long irMean = (bufFill > 0) ? (irSum / bufFill) : 0;
-
-    if (bufFill < (spo2SampleCount / 2) || irMean < spo2IrThreshold) {
-        // Slowly decay toward 0 so the dashboard knows signal is lost
-        if (lastSpO2 > 1.0f) lastSpO2 *= 0.97f;
-        else lastSpO2 = 0;
-        return;
-    }
-
-    // --- DC components (mean) ---
-    float dcRed = 0, dcIr = 0;
-    for (int i = 0; i < bufFill; i++) {
-        dcRed += (float)redBuf[i];
-        dcIr  += (float)irBuf[i];
-    }
-    dcRed /= bufFill;
-    dcIr  /= bufFill;
-
-    if (dcRed < 1.0f || dcIr < 1.0f) return;  // guard div/0
-
-    // --- AC components (RMS of deviation from DC) ---
-    float acRed2 = 0, acIr2 = 0;
-    for (int i = 0; i < bufFill; i++) {
-        float dr = (float)redBuf[i] - dcRed;
-        float di = (float)irBuf[i]  - dcIr;
-        acRed2 += dr * dr;
-        acIr2  += di * di;
-    }
-    float acRed = sqrtf(acRed2 / bufFill);
-    float acIr  = sqrtf(acIr2  / bufFill);
-
-    // Require meaningful pulsatile amplitude – ankle AC is small but present
-    if (acIr < 10.0f || acRed < 5.0f) {
-        if (lastSpO2 > 1.0f) lastSpO2 *= 0.97f;
-        else lastSpO2 = 0;
-        return;
-    }
-
-    // --- Ratio of Ratios ---
-    float R = (acRed / dcRed) / (acIr / dcIr);
-
-    // Standard empirical calibration curve:  SpO2 ≈ 110 − 25·R
-    // Coefficients from Maxim AN6409 / published literature.
-    // At ankle R is slightly elevated due to venous mixing; we keep the
-    // standard curve but rely on lenient validity bounds.
-    float rawSpO2 = 110.0f - 25.0f * R;
-
-    // Reject physically implausible values before smoothing
-    if (rawSpO2 < spo2MinValid || rawSpO2 > spo2MaxValid) {
-        if (lastSpO2 > 1.0f) lastSpO2 *= 0.97f;
-        else lastSpO2 = 0;
-        return;
-    }
-
-    // Slow EMA – heavily damps footstrike transients
-    if (lastSpO2 < spo2MinValid) {
-        lastSpO2 = rawSpO2;  // cold-start: seed immediately
-    } else {
-        lastSpO2 = spo2Alpha * rawSpO2 + (1.0f - spo2Alpha) * lastSpO2;
-    }
-}
-
-// ==================== GETTERS ====================
-float getCurrentBPM() {
-    return lastBPM;
-}
-
-float getCurrentSpO2() {
-    return lastSpO2;
-}
-
-long getCurrentSteps() {
-    return stepsSinceLastPublish;
-}
+bool isMax3010xHealthy(){ return state.max3010xOk; }
+bool isMPUHealthy()     { return state.mpuOk; }
+bool isBMEHealthy()     { return state.bmeOk; }

@@ -10,94 +10,107 @@
 #include "metrics.h"
 
 // ==================== TIMING VARIABLES ====================
-unsigned long lastPublishTime = 0;
-unsigned long lastSampleTime = 0;
+
+unsigned long lastPublishTime       = 0;
+unsigned long lastSampleTime        = 0;
 unsigned long lastSessionReportTime = 0;
 unsigned long lastMetricsUpdateTime = 0;
 
-const unsigned long sessionReportInterval = 60000;  // Report every minute
-const unsigned long metricsUpdateInterval = 5000;
+const unsigned long sessionReportInterval = 60000;  // 1 minute
+const unsigned long metricsUpdateInterval = 5000;   // 5 seconds
 
 // ==================== USER PARAMETERS (Defaults) ====================
-// These are exported in JSON for off-device recalculation
-float userMassKg = 70.0;           // User mass in kg
-float userHeightM = 1.75;          // User height in meters
-float strideLength = 0.78;         // Stride length in meters (0.43 × height is typical)
-float userMaxHR = 190.0;           // 220 - age, or user-measured
 
+float userMassKg     = 70.0f;
+float userHeightM    = 1.75f;
+float strideLength   = 0.78f;     // ~0.43 × height typical
+float userMaxHR      = 190.0f;
 
 // ==================== SETUP ====================
-void setup() {
+
+void setup()
+{
     Serial.begin(9600);
-    
-    // Initialize I2C
+
+    // ---- I2C ----
     Wire.begin(SDA_PIN, SCL_PIN);
     Serial.println("I2C initialized");
 
-    // Setup WiFi
+    // ---- Network ----
     setup_wifi();
-    
-    // Configure time
+
+    // ---- Time (UTC) ----
     configTzTime("UTC0", "pool.ntp.org", "time.nist.gov");
 
-    // Setup MQTT
+    // ---- MQTT ----
     client.setServer(mqtt_server, mqtt_port);
     client.setBufferSize(1024);
     espClient.setInsecure();
 
-    // Initialize sensors
+    // ---- Sensors ----
     initSensors();
-    Serial.println("Sensors initialized");
-    
+
+    if (!isMax3010xHealthy()) Serial.println("Warning: MAX3010x offline");
+    if (!isMPUHealthy())      Serial.println("Warning: MPU6050 offline");
+    if (!isBMEHealthy())      Serial.println("Warning: BME280 offline");
+
     Serial.println("Setup complete");
 }
 
 // ==================== LOOP ====================
-void loop() {
 
+void loop()
+{
     unsigned long now = millis();
-    
-    // MQTT maintenance
+
+    // ==================== MQTT MAINTENANCE ====================
+
     if (!client.connected()) {
         reconnect_mqtt();
     }
     client.loop();
-    
+
     // ==================== SENSOR SAMPLING ====================
-    // Fast sampling (50 Hz)
+    // Fast sampling (e.g. 50 Hz)
+
     if (now - lastSampleTime >= sampleInterval) {
         lastSampleTime = now;
-        
-        // Pass user parameters to motion processing
+
+        // 1. Optical sensors (HR + SpO2 share FIFO)
+        updateOpticalSensors();
+
+        // 2. Motion (step detection, motion metrics)
         updateMotion(userMassKg, strideLength);
-        updateHeartRate();
-        updateSpO2();
+
+        // 3. Environmental (temperature, pressure, stairs)
         updateEnvironment();
     }
 
     // ==================== METRICS CALCULATION ====================
+
     if (now - lastMetricsUpdateTime >= metricsUpdateInterval) {
         lastMetricsUpdateTime = now;
-        
-        // Get current sensor values
+
         float currentBPM = getCurrentBPM();
-        
-        // Get environmental data from last reading
-        float avgTemp, avgPress, avgHum, avgAlt, avgBPM;
-        avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM);
-        
-        // Calculate both metrics
-        calculateMetrics(currentBPM, avgTemp, avgHum, userMassKg, userMaxHR);
-        
+        float currentSpO2 = getCurrentSpO2();
+
+        float avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpO2;
+        avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM,avgSpO2);
+
+        calculateMetrics(currentBPM,
+                         avgTemp,
+                         avgHum,
+                         userMassKg,
+                         userMaxHR);
     }
-    
+
     // ==================== DATA PUBLISH ====================
+
     if (now - lastPublishTime >= publishInterval) {
         lastPublishTime = now;
-        
-        // Pass user parameters to publish function
-        publishSensorData(userMassKg, userHeightM, strideLength);
 
-        //printSessionReport(userMassKg, userHeightM, strideLength);
+        publishSensorData(userMassKg,
+                          userHeightM,
+                          strideLength);
     }
 }

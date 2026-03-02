@@ -33,6 +33,7 @@ extern unsigned long lastStepTime;
 // ==================== FUNCTION DECLARATIONS ====================
 void initSensors();
 void updateHeartRate();
+void updateOpticalSensors(); //new
 void updateSpO2();              // call every loop alongside updateHeartRate()
 void updateStairs(float altitudeM); // call from updateEnvironment with raw altitude
 void updateMotion(float userMassKg, float strideLength);
@@ -43,4 +44,7 @@ float getCurrentBPM();
 float getCurrentSpO2();         // returns 0 if signal too weak
 long getCurrentSteps();
 
+bool isMax3010xHealthy();
+bool isMPUHealthy();
+bool isBMEHealthy();
 #endif

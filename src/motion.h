@@ -84,7 +84,8 @@ void processMotionData(float ax, float ay, float az,
                        float gx, float gy, float gz,
                        float userMassKg, float strideLength);
 
-// Step detection (enhanced)
+// Step detection
+bool detectStep(float ax, float ay, float az);
 bool detectStepEnhanced(float verticalAcc, float magnitude);
 
 // Force & Power calculations

@@ -51,6 +51,8 @@ struct MetricsState {
     float initialBPM;
     float bpmDrift;
     float powerDecline;
+    float liveBPM;   
+    float maxHR; 
     
     // Environmental baseline
     float baselineTemp;

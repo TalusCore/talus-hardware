@@ -15,29 +15,25 @@
 // ==================== GLOBAL OBJECTS ====================
 Averages avgData;
 
-// ==================== STEP DETECTION VARIABLES ====================
-float gravity = 0;
-float alpha_step = 0.9;  // Using alpha from config.h conceptually
-bool stepHigh = false;
-
 // ==================== AVERAGING IMPLEMENTATION ====================
-void Averages::add(float temp, float press, float hum, float alt, float bpm) {
+void Averages::add(float temp, float press, float hum, float alt, float bpm, float spo2) {
     tempSum += temp;
     pressureSum += press;
     humiditySum += hum;
     altitudeSum += alt;
     bpmSum += bpm;
+    spo2Sum += spo2;
     count++;
 }
 
 void Averages::reset() {
-    tempSum = pressureSum = humiditySum = altitudeSum = bpmSum = 0;
+    tempSum = pressureSum = humiditySum = altitudeSum = bpmSum = spo2Sum = 0;
     count = 0;
 }
 
-void Averages::getAverages(float &temp, float &press, float &hum, float &alt, float &bpm) {
+void Averages::getAverages(float &temp, float &press, float &hum, float &alt, float &bpm, float &spo2) {
     if (count == 0) { 
-        temp = press = hum = alt = bpm = 0; 
+        temp = press = hum = alt = bpm = spo2 = 0; 
         return; 
     }
     temp = tempSum / count;
@@ -45,6 +41,7 @@ void Averages::getAverages(float &temp, float &press, float &hum, float &alt, fl
     hum = humiditySum / count;
     alt = altitudeSum / count;
     bpm = bpmSum / count;
+    spo2 = spo2Sum / count;
 }
 
 // ==================== TIMESTAMP ====================
@@ -77,15 +74,14 @@ void printSessionReport(float userMassKg, float userHeightM, float strideLength)
     
     // Get health metrics
     TPIComponents tpi = getTPIComponents();
-    TSIComponents tsi = getTSIComponents();
     
     // Get averaged environmental data
-    float avgTemp, avgPress, avgHum, avgAlt, avgBPM;
-    avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM);
+    float avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpo2;
+    avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpo2);
 
     float durationMin = session.sessionDuration / 60000.0;
 
-    Serial.println("\n╔══════════════════════════════════╗");
+    Serial.println("\n╔════════════════════════════════╗");
     // Serial.println("║          SESSION REPORT            ║");
 
     // // --- User Params (matches JSON: userParams) ---
@@ -100,19 +96,20 @@ void printSessionReport(float userMassKg, float userHeightM, float strideLength)
     // Serial.println("╠════════════════════════════════════╣");
     // Serial.println("║ ENVIRONMENT (stats)                ║");
     // Serial.println("╠════════════════════════════════════╣");
-    Serial.printf("║ Temperature:     %6.1f C        ║\n", avgTemp);
-    Serial.printf("║ Pressure:        %6.1f hPa      ║\n", avgPress);
-    Serial.printf("║ Humidity:        %6.1f %%        ║\n", avgHum);
-    Serial.printf("║ Altitude:        %6.1f m        ║\n", avgAlt);
-    Serial.printf("║ BPM:             %6.1f          ║\n", avgBPM);
+    // Serial.printf("║ Temperature:     %6.1f C        ║\n", avgTemp);
+    // Serial.printf("║ Pressure:        %6.1f hPa      ║\n", avgPress);
+    // Serial.printf("║ Humidity:        %6.1f %%        ║\n", avgHum);
+    // Serial.printf("║ Altitude:        %6.1f m        ║\n", avgAlt);
+    //Serial.printf("║ BPM:             %6.1f          ║\n", avgBPM);
+    Serial.printf("║ BPM:             %6.1f          ║\n", getCurrentBPM());
     Serial.printf("║ SpO2:            %6.1f %%        ║\n", getCurrentSpO2());
 
     // --- Motion (matches JSON: motion) ---
     // Serial.println("╠════════════════════════════════════╣");
     // Serial.println("║ MOTION                             ║");
     // Serial.println("╠════════════════════════════════════╣");
-    Serial.printf("║ Steps:           %6d          ║\n", session.totalSteps);
-    Serial.printf("║ Flights climbed: %6d          ║\n", session.flightsClimbed);
+    // Serial.printf("║ Steps:           %6d          ║\n", session.totalSteps);
+    // Serial.printf("║ Flights climbed: %6d          ║\n", session.flightsClimbed);
     // Serial.printf("║ Distance:        %6.1f m        ║\n", session.totalDistance);
     // Serial.printf("║ Avg Cadence:     %6.1f spm      ║\n", session.avgCadence);
     // Serial.printf("║ Max Force:       %6.1f N        ║\n", session.maxForce);
@@ -132,7 +129,7 @@ void printSessionReport(float userMassKg, float userHeightM, float strideLength)
     // Serial.println("╠════════════════════════════════════╣");
     // Serial.println("║ HEALTH METRICS                     ║");
     // Serial.println("╠════════════════════════════════════╣");
-    Serial.printf("║ TPI Score:       %6.1f / 100    ║\n", tpi.finalScore);
+    //Serial.printf("║ TPI Score:       %6.1f / 100    ║\n", tpi.finalScore);
     // Serial.printf("║   Mechanical:    %6.1f          ║\n", tpi.mechanicalOutput);
     // Serial.printf("║   Cardio:        %6.1f          ║\n", tpi.cardioStrain);
     // Serial.printf("║   Efficiency:    %6.1f          ║\n", tpi.efficiency);
@@ -143,5 +140,5 @@ void printSessionReport(float userMassKg, float userHeightM, float strideLength)
     // Serial.println("╠════════════════════════════════════╣");
     // Serial.printf("║ Duration:        %6.1f min      ║\n", durationMin);
     // Serial.printf("║ Avg Step Time:   %6.0f ms       ║\n", session.avgStepTime);
-     Serial.println("╚══════════════════════════════════╝\n");
+     Serial.println("╚════════════════════════════════╝\n");
 }

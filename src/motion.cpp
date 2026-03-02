@@ -90,7 +90,8 @@ void processMotionData(float ax, float ay, float az,
     float smoothedAcc = smoothAcceleration(verticalAcc);
     
     // Detect steps with enhanced algorithm
-    bool stepDetected = detectStepEnhanced(smoothedAcc, magnitude);
+    //bool stepDetected = detectStepEnhanced(smoothedAcc, magnitude);
+    bool stepDetected = detectStep(ax,ay,az);
     
     if (stepDetected) {
         // Calculate step metrics
@@ -135,64 +136,97 @@ void processMotionData(float ax, float ay, float az,
     }
 }
 
+// ==================== STEP DETECTION ====================
+// Step detection variables
+float gravity = 0;
+bool stepHigh = false;
+const unsigned long minStepIntervalStep = 300; // ms
+unsigned long lastStepTimeStep = 0;
+
+bool detectStep(float ax, float ay, float az) {
+    float mag = sqrt(ax * ax + ay * ay + az * az);
+
+    // Remove gravity (high-pass filter)
+    gravity = alpha * gravity + (1 - alpha) * mag;
+    float filtered = mag - gravity;
+
+    // Adaptive threshold
+    float noiseLevel = fabs(filtered) * 0.2;
+    float threshold = dynamicThreshold + noiseLevel;
+
+    unsigned long now = millis();
+
+    if (!stepHigh && filtered > threshold) {
+        stepHigh = true;
+    } else if (stepHigh && filtered < 0) {
+        if (now - lastStepTimeStep > minStepIntervalStep) {
+            lastStepTimeStep = now;
+
+            return true;
+        }
+        stepHigh = false;
+    }
+    return false;
+}
+
 // ==================== ENHANCED STEP DETECTION ====================
 
-bool detectStepEnhanced(float verticalAcc, float magnitude) {
-    unsigned long now = millis();
-    bool stepDetected = false;
+// bool detectStepEnhanced(float verticalAcc, float magnitude) {
+//     unsigned long now = millis();
+//     bool stepDetected = false;
     
-    // Track peak and minimum during potential step
-    if (stepInProgress) {
-        if (verticalAcc > peakAccelThisStep) {
-            peakAccelThisStep = verticalAcc;
-        }
-        if (verticalAcc < minAccelThisStep) {
-            minAccelThisStep = verticalAcc;
-        }
-    }
+//     // Track peak and minimum during potential step
+//     if (stepInProgress) {
+//         if (verticalAcc > peakAccelThisStep) {
+//             peakAccelThisStep = verticalAcc;
+//         }
+//         if (verticalAcc < minAccelThisStep) {
+//             minAccelThisStep = verticalAcc;
+//         }
+//     }
     
-    // State machine for step detection
-    switch (currentPhase) {
-        case SWING_PHASE:
-            // Detect foot leaving ground (low acceleration)
-            if (magnitude < (GRAVITY_BASELINE - swingThreshold)) {
-                currentPhase = LOADING_PHASE;
-                stepInProgress = true;
-                peakAccelThisStep = verticalAcc;
-                minAccelThisStep = verticalAcc;
-                currentStepStartTime = now;
-            }
-            break;
+//     // State machine for step detection
+//     switch (currentPhase) {
+//         case SWING_PHASE:
+//             // Detect foot leaving ground (low acceleration)
+//             if (magnitude < (GRAVITY_BASELINE - swingThreshold)) {
+//                 currentPhase = LOADING_PHASE;
+//                 stepInProgress = true;
+//                 peakAccelThisStep = verticalAcc;
+//                 minAccelThisStep = verticalAcc;
+//                 currentStepStartTime = now;
+//             }
+//             break;
             
-        case LOADING_PHASE:
-            // Detect impact (high acceleration spike)
-            if (magnitude > (GRAVITY_BASELINE + impactThreshold)) {
-                // Check minimum time between steps
-                if (now - lastStepTimestamp >= minStepInterval) {
-                    // Valid step detected!
-                    stepDetected = true;
-                    currentPhase = STANCE_PHASE;
-                }
-            }
+//         case LOADING_PHASE:
+//             // Detect impact (high acceleration spike)
+//             if (magnitude > (GRAVITY_BASELINE + impactThreshold)) {
+//                 // Check minimum time between steps
+//                 if (now - lastStepTimestamp >= minStepInterval) {
+//                     // Valid step detected!
+//                     stepDetected = true;
+//                     currentPhase = STANCE_PHASE;
+//                 }
+//             }
             
-            // Timeout if no impact detected
-            if (now - currentStepStartTime > MAX_STEP_TIME) {
-                currentPhase = SWING_PHASE;
-                stepInProgress = false;
-            }
-            break;
+//             // Timeout if no impact detected
+//             if (now - currentStepStartTime > MAX_STEP_TIME) {
+//                 currentPhase = SWING_PHASE;
+//                 stepInProgress = false;
+//             }
+//             break;
             
-        case STANCE_PHASE:
-            // Wait for foot to settle, then return to swing
-            if (magnitude < (GRAVITY_BASELINE + 0.3)) {
-                currentPhase = SWING_PHASE;
-                stepInProgress = false;
-            }
-            break;
-    }
+//         case STANCE_PHASE:
+//             // Wait for foot to settle, then return to swing
+//             if (magnitude < (GRAVITY_BASELINE + 0.3)) {
+//                 currentPhase = SWING_PHASE;
+//                 stepInProgress = false;
+//             }
+//             break;
+//     }
     
-    return stepDetected;
-}
+//     return stepDetected;
+// }
 
 // ==================== FORCE CALCULATION ====================
 

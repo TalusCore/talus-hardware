@@ -2,7 +2,7 @@
 
 /* ============================================================
 **
-** Talus health metrics: Talus Performance Index or Talus Strain Index
+** Talus health metrics: Talus Performance Index
 **
 ** ============================================================
 */
@@ -92,6 +92,8 @@ void calculateMetrics(float bpm, float temperature, float humidity,
     
     // Track fatigue indicators
     metricsState.bpmDrift = bpm - metricsState.initialBPM;
+    metricsState.liveBPM  = bpm;
+    metricsState.maxHR    = maxHR;
     if (metricsState.initialPower > 0) {
         metricsState.powerDecline = 
             (metricsState.initialPower - session.avgPower) / metricsState.initialPower;
@@ -117,9 +119,9 @@ TPIComponents calculateTPI() {
     
     // Component 2: Cardio Strain (30%)
     SessionMetrics session = getSessionMetrics();
-    // Use average cadence as proxy for current BPM if not available
-    float estimatedMaxHR = 220 - 30; 
-    tpi.cardioStrain = calculateCardioStrain(75.0, estimatedMaxHR);  // Placeholder BPM
+
+    tpi.cardioStrain = calculateCardioStrain(metricsState.liveBPM, metricsState.maxHR);
+
     
     // Component 3: Efficiency (20%)
     tpi.efficiency = calculateEfficiency();
@@ -185,8 +187,7 @@ float calculateEfficiency() {
     float mechanicalOutput = calculateMechanicalOutput();
     SessionMetrics session = getSessionMetrics();
     
-    // Estimate cardio effort from cadence (proxy for HR)
-    float cardioEffort = normalize(session.avgCadence, 60, 180) * 100;
+    float cardioEffort = normalize(metricsState.liveBPM, 40, metricsState.maxHR) * 100;
     
     if (cardioEffort == 0) return 50;  // Neutral if no data
     

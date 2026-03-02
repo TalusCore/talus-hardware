@@ -89,8 +89,8 @@ void reconnect_mqtt() {
 // ==================== PUBLISH SENSOR DATA ====================
 void publishSensorData(float userMassKg, float userHeightM, float strideLength) {
     // Get averaged sensor data
-    float avgTemp, avgPress, avgHum, avgAlt, avgBPM;
-    avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM);
+    float avgTemp, avgPress, avgHum, avgAlt, avgBPM,avgSpo2;
+    avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM,avgSpo2);
 
     // Get session metrics NEW
     SessionMetrics session = getSessionMetrics();
@@ -114,8 +114,8 @@ void publishSensorData(float userMassKg, float userHeightM, float strideLength) 
     stats["humidity"] = avgHum;
     stats["altitude"] = avgAlt;
     stats["bpm"] = avgBPM;
-    stats["spo2"] = getCurrentSpO2();   // 0 = no valid ankle signal
-    
+    stats["spo2"] = avgSpo2;   // 0 = no valid ankle signal
+
     // Motion metrics (calculated with user parameters) NEW
     stats["steps"] = session.totalSteps;
     stats["distance"] = session.totalDistance;

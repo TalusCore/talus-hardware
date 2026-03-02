@@ -18,11 +18,12 @@ struct Averages {
     float humiditySum;
     float altitudeSum;
     float bpmSum;
+    float spo2Sum;
     int count;
 
-    void add(float temp, float press, float hum, float alt, float bpm);
+    void add(float temp, float press, float hum, float alt, float bpm, float spo2);
     void reset();
-    void getAverages(float &temp, float &press, float &hum, float &alt, float &bpm);
+    void getAverages(float &temp, float &press, float &hum, float &alt, float &bpm, float &spo2);
 };
 
 extern Averages avgData;
@@ -36,7 +37,6 @@ extern bool stepHigh;
 // ==================== FUNCTION DECLARATIONS ====================
 String getUTCTimestamp();
 String escapeForC(const String& input);
-void detectStep(float ax, float ay, float az);
 void printSessionReport(float userMassKg, float userHeightM, float strideLength);
 
 #endif
