@@ -91,7 +91,7 @@ static void seq_to_path(uint32_t seq, char* buf, size_t bufLen) {
 void queue_init() {
     // Mount LittleFS; format on first use if the partition is blank.
     if (!LittleFS.begin(true)) {
-        Serial.println("[Queue] LittleFS mount failed — queue disabled.");
+        Serial.println("[Queue] LittleFS mount failed, queue disabled.");
         return;
     }
 
@@ -122,7 +122,7 @@ bool queue_enqueue(const char* payload) {
         seq_to_path(ack, oldPath, sizeof(oldPath));
         LittleFS.remove(oldPath);
         write_index(QUEUE_ACK_FILE, ack + 1);
-        Serial.println("[Queue] Capacity reached — oldest message dropped.");
+        Serial.println("[Queue] Capacity reached, oldest message dropped.");
     }
 
     uint32_t seq = read_index(QUEUE_SEQ_FILE, 0);
@@ -174,7 +174,7 @@ void queue_flush() {
 
         // File might be missing if a previous write was interrupted.
         if (!LittleFS.exists(path)) {
-            Serial.printf("[Queue] seq=%u missing on disk — skipping.\n", i);
+            Serial.printf("[Queue] seq=%u missing on disk, skipping.\n", i);
             write_index(QUEUE_ACK_FILE, i + 1);
             continue;
         }
@@ -182,7 +182,7 @@ void queue_flush() {
         // Read the message from flash.
         File f = LittleFS.open(path, "r");
         if (!f) {
-            Serial.printf("[Queue] Could not open seq=%u — skipping.\n", i);
+            Serial.printf("[Queue] Could not open seq=%u, skipping.\n", i);
             write_index(QUEUE_ACK_FILE, i + 1);
             continue;
         }
@@ -194,7 +194,7 @@ void queue_flush() {
         // Attempt MQTT publish.
         bool ok = client.publish(mqtt_topic, msgBuf, len);
         if (!ok) {
-            Serial.printf("[Queue] Publish failed at seq=%u — will retry next cycle.\n", i);
+            Serial.printf("[Queue] Publish failed at seq=%u, will retry next cycle.\n", i);
             break;  // Keep this file; stop so we don't skip it.
         }
 
@@ -238,7 +238,7 @@ void queue_print_timestamps() {
         seq_to_path(i, path, sizeof(path));
 
         if (!LittleFS.exists(path)) {
-            Serial.printf("  seq=%-6u  <file missing>\n", i);
+            //Serial.printf("  seq=%-6u  <file missing>\n", i);
             continue;
         }
 
@@ -258,7 +258,7 @@ void queue_print_timestamps() {
         DeserializationError err = deserializeJson(doc, msgBuf, len);
 
         if (err) {
-            Serial.printf("  seq=%-6u  <parse error: %s>\n", i, err.c_str());
+            //Serial.printf("  seq=%-6u  <parse error: %s>\n", i, err.c_str());
             continue;
         }
 
@@ -384,7 +384,7 @@ static void attempt_wifi_reconnect() {
             wifiState      = WIFI_IDLE;
             wifiNetworkIdx = 0;
             lastWifiAttemptMs = now;
-            Serial.println("[WiFi] All networks failed — will retry later.");
+            Serial.println("[WiFi] All networks failed, will retry later.");
         }
         return;
     }
@@ -394,7 +394,7 @@ static void attempt_wifi_reconnect() {
     lastWifiAttemptMs = now;
     wifiReadyMs = 0;  // Reset DNS settle timer for the new connection
 
-    Serial.println("[WiFi] Connection lost — starting reconnect cycle...");
+    Serial.println("[WiFi] Connection lost, starting reconnect cycle...");
     wifiNetworkIdx = 0;
     if (PERSONAL_NETWORK_COUNT > 0) {
         begin_personal_network(0);
@@ -420,7 +420,7 @@ void reconnect_mqtt() {
     if (client.connect(mqtt_client_id, mqtt_username, mqtt_password)) {
         Serial.println("connected.");
     } else {
-        Serial.printf("failed (rc=%d) — will retry.\n", client.state());
+        Serial.printf("failed (rc=%d), will retry.\n", client.state());
     }
 }
 
@@ -460,12 +460,12 @@ void maintain_connection() {
 void publishSensorData(float userMassKg, float userHeightM, float strideLength) {
 
     // ---- Gather data ----
-    float avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpo2;
-    avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpo2);
+    // float avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpo2;
+    // avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpo2);
 
     SessionMetrics session = getSessionMetrics();
     String         timestamp = getUTCTimestamp();
-    TPIComponents  tpi = getTPIComponents();
+    // TPIComponents  tpi = getTPIComponents();
 
     // ---- Build JSON (downsized to 512 bytes) ----
     DynamicJsonDocument doc(512);
@@ -473,21 +473,31 @@ void publishSensorData(float userMassKg, float userHeightM, float strideLength) 
     doc["timestamp"] = timestamp;
 
     JsonObject stats = doc.createNestedObject("stats");
-    stats["temperature"]    = avgTemp;
-    stats["pressure"]       = avgPress;
-    stats["humidity"]       = avgHum;
-    stats["altitude"]       = avgAlt;
-    stats["bpm"]            = avgBPM;
-    stats["spo2"]           = avgSpo2;
-    stats["steps"]          = session.totalSteps;
-    stats["distance"]       = session.totalDistance;
-    stats["cadence"]        = session.avgCadence;
-    stats["flightsClimbed"] = session.flightsClimbed;
-    stats["maxForce"]       = session.maxForce;
-    stats["maxPower"]       = session.maxPower;
-    stats["avgForce"]       = session.avgForce;
-    stats["avgPower"]       = session.avgPower;
-    stats["tpi"]            = tpi.finalScore;
+    // stats["temperature"]    = avgTemp;
+    // stats["pressure"]       = avgPress;
+    // stats["humidity"]       = avgHum;
+    // stats["altitude"]       = avgAlt;
+    // stats["bpm"]            = avgBPM;
+    // stats["spo2"]           = avgSpo2;
+    // stats["steps"]          = session.totalSteps;
+    // stats["cadence"]        = session.avgCadence;
+    // stats["flightsClimbed"] = session.flightsClimbed;
+    // stats["avgForce"]       = session.avgForce;
+    // stats["avgPower"]       = session.avgPower;
+    // stats["tpi"]            = tpi.finalScore;
+
+    stats["temperature"]    = 0;
+    stats["pressure"]       = 0;
+    stats["humidity"]       = 0;
+    stats["altitude"]       = 0;
+    stats["bpm"]            = 0;
+    stats["spo2"]           = 0;
+    stats["steps"]          = 0;
+    stats["cadence"]        = 0;
+    stats["flightsClimbed"] = 0;
+    stats["avgForce"]       = 0;
+    stats["avgPower"]       = 0;
+    stats["tpi"]            = 0;
 
     char buffer[512];
     serializeJson(doc, buffer, sizeof(buffer));
@@ -504,12 +514,12 @@ void publishSensorData(float userMassKg, float userHeightM, float strideLength) 
         if (ok) {
             Serial.println("[MQTT] Published.");
         } else {
-            Serial.println("[MQTT] Publish failed — queuing message.");
+            Serial.println("[MQTT] Publish failed, queuing message.");
             queue_enqueue(buffer);
         }
     } else {
         queue_enqueue(buffer);
-        Serial.printf("[MQTT] Offline — message queued. Depth: %d / %d\n",
+        Serial.printf("[MQTT] Offline message queued. Depth: %d / %d\n",
                       queue_count(), QUEUE_MAX_MESSAGES);
     }
 

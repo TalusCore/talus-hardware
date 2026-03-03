@@ -48,6 +48,8 @@ void Averages::getAverages(float &temp, float &press, float &hum, float &alt, fl
 // ==================== TIMESTAMP ====================
 static time_t lastKnownEpoch = 0;  // 0 = never synced
 
+const time_t BOOT_EPOCH = 1772560800;
+
 String getUTCTimestamp() {
     struct tm timeinfo;
 
@@ -68,7 +70,7 @@ String getUTCTimestamp() {
         // Never had a valid sync at all — nothing to extrapolate from.
         unsigned long uptimeSec = millis() / 1000UL;
         char fallback[24];
-        snprintf(fallback, sizeof(fallback), "boot+%lus", uptimeSec);
+        snprintf(fallback, sizeof(fallback), "No wifi connection initiated, boo+%lus", uptimeSec);
         Serial.printf("[Time] No NTP sync yet — using fallback: %s\n", fallback);
         return String(fallback);
     }

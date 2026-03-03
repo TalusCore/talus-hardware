@@ -51,14 +51,14 @@ void setup()
     espClient.setInsecure();
 
     // // ---- Sensors ----
-    initSensors();
+    // initSensors();
 
-    if (!isMax3010xHealthy()) Serial.println("Warning: MAX3010x offline");
-    if (!isMPUHealthy())      Serial.println("Warning: MPU6050 offline");
-    if (!isBMEHealthy())      Serial.println("Warning: BME280 offline");
+    // if (!isMax3010xHealthy()) Serial.println("Warning: MAX3010x offline");
+    // if (!isMPUHealthy())      Serial.println("Warning: MPU6050 offline");
+    // if (!isBMEHealthy())      Serial.println("Warning: BME280 offline");
 
     // Serial.println("Setup complete");
-    queue_print_status();
+    //queue_print_status();
 }
 
 // ==================== LOOP ====================
@@ -73,31 +73,31 @@ void loop()
 
     maintain_connection();
 
-    // ==================== SENSOR SAMPLING (50 Hz) ====================
+    // // ==================== SENSOR SAMPLING (50 Hz) ====================
 
-    if (now - lastSampleTime >= sampleInterval) {
-        lastSampleTime = now;
+    // if (now - lastSampleTime >= sampleInterval) {
+    //     lastSampleTime = now;
 
-        updateOpticalSensors();                   // HR + SpO2
-        updateMotion(userMassKg, strideLength);   // Steps, force, power
-        updateEnvironment();                      // Temp, pressure, stairs
-    }
+    //     updateOpticalSensors();                   // HR + SpO2
+    //     updateMotion(userMassKg, strideLength);   // Steps, force, power
+    //     updateEnvironment();                      // Temp, pressure, stairs
+    // }
 
-    // ==================== METRICS CALCULATION ====================
+    // // ==================== METRICS CALCULATION ====================
 
-    if (now - lastMetricsUpdateTime >= metricsUpdateInterval) {
-        lastMetricsUpdateTime = now;
+    // if (now - lastMetricsUpdateTime >= metricsUpdateInterval) {
+    //     lastMetricsUpdateTime = now;
 
-        float currentBPM  = getCurrentBPM();
-        float avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpO2;
-        avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpO2);
+    //     float currentBPM  = getCurrentBPM();
+    //     float avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpO2;
+    //     avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpO2);
 
-        calculateMetrics(currentBPM,
-                         avgTemp,
-                         avgHum,
-                         userMassKg,
-                         userMaxHR);
-    }
+    //     calculateMetrics(currentBPM,
+    //                      avgTemp,
+    //                      avgHum,
+    //                      userMassKg,
+    //                      userMaxHR);
+    // }
 
     // ==================== DATA PUBLISH ====================
     // publishSensorData() enqueues to LittleFS if offline and flushes
