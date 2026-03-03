@@ -14,6 +14,7 @@
 
 // ==================== GLOBAL OBJECTS ====================
 Averages avgData;
+struct tm lastTimestamp;
 
 // ==================== AVERAGING IMPLEMENTATION ====================
 void Averages::add(float temp, float press, float hum, float alt, float bpm, float spo2) {
@@ -45,15 +46,45 @@ void Averages::getAverages(float &temp, float &press, float &hum, float &alt, fl
 }
 
 // ==================== TIMESTAMP ====================
+static time_t lastKnownEpoch = 0;  // 0 = never synced
+
 String getUTCTimestamp() {
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
-        return "unknown";
+
+    // Attempt to read the RTC (set by NTP).
+    // getLocalTime() accepts a timeout in ms; 10 ms is enough for a
+    // cached value — we are not waiting for a network round-trip here.
+    if (getLocalTime(&timeinfo, 10) && timeinfo.tm_year > 120) {
+        // NTP is healthy — update our stored epoch from the live RTC.
+        lastKnownEpoch = mktime(&timeinfo);
+
+        char isoTime[30];
+        strftime(isoTime, sizeof(isoTime), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+        return String(isoTime);
     }
+
+    // NTP unavailable — advance the last known time by publishInterval.
+    if (lastKnownEpoch == 0) {
+        // Never had a valid sync at all — nothing to extrapolate from.
+        unsigned long uptimeSec = millis() / 1000UL;
+        char fallback[24];
+        snprintf(fallback, sizeof(fallback), "boot+%lus", uptimeSec);
+        Serial.printf("[Time] No NTP sync yet — using fallback: %s\n", fallback);
+        return String(fallback);
+    }
+
+    // Advance by one publish interval (5 s) and reformat.
+    lastKnownEpoch += (publishInterval / 1000UL);
+
+    struct tm estimated;
+    gmtime_r(&lastKnownEpoch, &estimated);   // epoch → broken-down UTC
+
     char isoTime[30];
-    strftime(isoTime, sizeof(isoTime), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+    strftime(isoTime, sizeof(isoTime), "%Y-%m-%dT%H:%M:%SZ", &estimated);
+    Serial.printf("[Time] NTP unavailable — estimated: %s\n", isoTime);
     return String(isoTime);
 }
+
 
 // ==================== STRING ESCAPING ====================
 String escapeForC(const String& input) {

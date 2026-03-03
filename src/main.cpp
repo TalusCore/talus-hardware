@@ -21,10 +21,10 @@ const unsigned long metricsUpdateInterval = 5000;   // 5 seconds
 
 // ==================== USER PARAMETERS (Defaults) ====================
 
-float userMassKg     = 70.0f;
-float userHeightM    = 1.75f;
-float strideLength   = 0.78f;     // ~0.43 × height typical
-float userMaxHR      = 190.0f;
+float userMassKg   = 70.0f;
+float userHeightM  = 1.75f;
+float strideLength = 0.78f;   // ~0.43 × height typical
+float userMaxHR    = 190.0f;
 
 // ==================== SETUP ====================
 
@@ -36,7 +36,10 @@ void setup()
     Wire.begin(SDA_PIN, SCL_PIN);
     Serial.println("I2C initialized");
 
-    // ---- Network ----
+    // ---- Network + LittleFS queue ----
+    // setup_wifi() mounts LittleFS and calls queue_init() internally,
+    // so any messages persisted from a previous session are immediately
+    // available for flushing once MQTT reconnects.
     setup_wifi();
 
     // ---- Time (UTC) ----
@@ -44,17 +47,18 @@ void setup()
 
     // ---- MQTT ----
     client.setServer(mqtt_server, mqtt_port);
-    client.setBufferSize(1024);
+    client.setBufferSize(512);   // Reduced from 1024 — matches new payload size
     espClient.setInsecure();
 
-    // ---- Sensors ----
+    // // ---- Sensors ----
     initSensors();
 
     if (!isMax3010xHealthy()) Serial.println("Warning: MAX3010x offline");
     if (!isMPUHealthy())      Serial.println("Warning: MPU6050 offline");
     if (!isBMEHealthy())      Serial.println("Warning: BME280 offline");
 
-    Serial.println("Setup complete");
+    // Serial.println("Setup complete");
+    queue_print_status();
 }
 
 // ==================== LOOP ====================
@@ -63,27 +67,20 @@ void loop()
 {
     unsigned long now = millis();
 
-    // ==================== MQTT MAINTENANCE ====================
+    // ==================== CONNECTION MAINTENANCE ====================
+    // Handles WiFi reconnection, MQTT reconnection, and drains the
+    // LittleFS queue — all non-blocking.
 
-    if (!client.connected()) {
-        reconnect_mqtt();
-    }
-    client.loop();
+    maintain_connection();
 
-    // ==================== SENSOR SAMPLING ====================
-    // Fast sampling (e.g. 50 Hz)
+    // ==================== SENSOR SAMPLING (50 Hz) ====================
 
     if (now - lastSampleTime >= sampleInterval) {
         lastSampleTime = now;
 
-        // 1. Optical sensors (HR + SpO2 share FIFO)
-        updateOpticalSensors();
-
-        // 2. Motion (step detection, motion metrics)
-        updateMotion(userMassKg, strideLength);
-
-        // 3. Environmental (temperature, pressure, stairs)
-        updateEnvironment();
+        updateOpticalSensors();                   // HR + SpO2
+        updateMotion(userMassKg, strideLength);   // Steps, force, power
+        updateEnvironment();                      // Temp, pressure, stairs
     }
 
     // ==================== METRICS CALCULATION ====================
@@ -91,11 +88,9 @@ void loop()
     if (now - lastMetricsUpdateTime >= metricsUpdateInterval) {
         lastMetricsUpdateTime = now;
 
-        float currentBPM = getCurrentBPM();
-        float currentSpO2 = getCurrentSpO2();
-
+        float currentBPM  = getCurrentBPM();
         float avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpO2;
-        avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM,avgSpO2);
+        avgData.getAverages(avgTemp, avgPress, avgHum, avgAlt, avgBPM, avgSpO2);
 
         calculateMetrics(currentBPM,
                          avgTemp,
@@ -105,6 +100,8 @@ void loop()
     }
 
     // ==================== DATA PUBLISH ====================
+    // publishSensorData() enqueues to LittleFS if offline and flushes
+    // the backlog automatically once connectivity is restored.
 
     if (now - lastPublishTime >= publishInterval) {
         lastPublishTime = now;
