@@ -117,12 +117,10 @@ void publishSensorData(float userMassKg, float userHeightM, float strideLength) 
     stats["spo2"] = avgSpo2;   // 0 = no valid ankle signal
 
     // Motion metrics (calculated with user parameters) NEW
-    stats["steps"] = session.totalSteps;
-    stats["distance"] = session.totalDistance;
+    // stats["steps"] = session.totalSteps;
+    stats["steps"] = stepsSinceLastPublish;
     stats["cadence"] = session.avgCadence;
-    stats["flightsClimbed"] = session.flightsClimbed;
-    stats["maxForce"] = session.maxForce;
-    stats["maxPower"] = session.maxPower;
+    stats["flightsClimbed"] = flightsSinceLastPublish;
     stats["avgForce"] = session.avgForce;
     stats["avgPower"] = session.avgPower;
 
@@ -145,4 +143,5 @@ void publishSensorData(float userMassKg, float userHeightM, float strideLength) 
     // Reset for next interval
     avgData.reset();
     stepsSinceLastPublish = 0;
+    flightsSinceLastPublish = 0;
 }

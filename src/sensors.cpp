@@ -65,6 +65,7 @@ float lastBPM = 0;
 float lastSpO2 = 0;
 long stepCount = 0;
 long stepsSinceLastPublish = 0;
+long flightsSinceLastPublish = 0;
 unsigned long lastStepTime = 0;
 
 // ============================================================
@@ -291,6 +292,7 @@ void updateStairs(float altitudeM)
 
         if (steps >= STAIR_MIN_STEPS) {
             currentSession.flightsClimbed++;
+            flightsSinceLastPublish++;
             Serial.printf("Stair flight #%d detected\n",
                           currentSession.flightsClimbed);
         }

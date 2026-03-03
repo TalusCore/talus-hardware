@@ -28,6 +28,7 @@ extern float lastBPM;
 extern float lastSpO2;          // smoothed SpO2 % (0 = no valid reading)
 extern long stepCount;
 extern long stepsSinceLastPublish;
+extern long flightsSinceLastPublish; 
 extern unsigned long lastStepTime;
 
 // ==================== FUNCTION DECLARATIONS ====================

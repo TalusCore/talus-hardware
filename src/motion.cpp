@@ -30,6 +30,8 @@ float currentVerticalVelocity = 0;
 unsigned long lastStepTimestamp = 0;
 unsigned long currentStepStartTime = 0;
 
+extern long stepsSinceLastPublish;
+
 // Constants
 const float GRAVITY_BASELINE = 1.0;       // g - expected gravity
 const float NOISE_THRESHOLD = 0.1;        // ignore small fluctuations
@@ -114,6 +116,7 @@ void processMotionData(float ax, float ay, float az,
         
         // Update session statistics
         updateSessionStats(step, strideLength);
+        stepsSinceLastPublish++;
         
         // Debug output
         //Serial.printf("Step #%d | Force: %.1fN | Power: %.1fW | Cadence: %.1f spm\n",
@@ -158,13 +161,19 @@ bool detectStep(float ax, float ay, float az) {
 
     if (!stepHigh && filtered > threshold) {
         stepHigh = true;
-    } else if (stepHigh && filtered < 0) {
-        if (now - lastStepTimeStep > minStepIntervalStep) {
-            lastStepTimeStep = now;
+        peakAccelThisStep = mag;         // begin tracking peak for this step
+    } else if (stepHigh) {
+        if (mag > peakAccelThisStep) peakAccelThisStep = mag;  // update peak during swing
 
-            return true;
+        if (filtered < 0) {
+            if (now - lastStepTimeStep > minStepIntervalStep) {
+                lastStepTimeStep = now;
+                // peakAccelThisStep holds the peak g value for processMotionData to use
+                stepHigh = false;
+                return true;
+            }
+            stepHigh = false;
         }
-        stepHigh = false;
     }
     return false;
 }
